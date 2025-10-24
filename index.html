@@ -1,1 +1,187 @@
-HOLA
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Registro de Peso (kg)</title>
+
+  <meta name="theme-color" content="#2cc8bd" />
+  <meta name="color-scheme" content="dark light" />
+
+  <!-- CSS -->
+  <link rel="stylesheet" href="./assets/css/styles.css" />
+
+  <!-- Favicon “vacío” para evitar 404 -->
+  <link rel="icon" href="data:," />
+
+  <!-- Preload imagen del hero -->
+  <link rel="preload" as="image" href="./assets/img/Logomtxsblancotagline.png" />
+  <link rel="preconnect" href="https://script.google.com" crossorigin />
+</head>
+<body>
+  <noscript style="display:block; padding:12px; text-align:center; color:#fff; background:#b00020;">
+    Activa JavaScript para usar el registro.
+  </noscript>
+
+  <div class="wrap">
+    <div class="card">
+      <!-- HERO: cabecero con imagen -->
+      <header class="brand-header hero" role="banner">
+        <img
+          src="./assets/img/Logomtxsblancotagline.png?v=1"
+          alt="Jaime Valencia — Entrenamiento Personal, Nutrición y Programación online"
+          class="hero-img"
+          loading="eager"
+          fetchpriority="high"
+          decoding="async"
+        />
+      </header>
+
+      <div class="content">
+        <!-- Botón sesión a la derecha -->
+        <div class="actions" aria-label="Sesión">
+          <div class="center" style="margin-left:auto;">
+            <button id="logoutBtn" type="button" class="hide" title="Cerrar sesión">Cerrar sesión</button>
+          </div>
+        </div>
+
+        <!-- Formulario -->
+        <div class="row" style="margin-top:14px">
+          <div>
+            <label for="peso">Peso (kg)</label>
+            <input
+              id="peso"
+              type="number"
+              inputmode="decimal"
+              enterkeyhint="done"
+              step="0.1"
+              min="20"
+              max="400"
+              placeholder="Ej: 72.4"
+              autocomplete="off"
+              autocapitalize="off"
+              required
+              aria-describedby="pesoHelp"
+            />
+            <small class="muted" id="pesoHelp">Usa punto o coma para decimales.</small>
+          </div>
+          <div>
+            <label for="fecha">Fecha</label>
+            <input
+              id="fecha"
+              type="date"
+              required
+              aria-describedby="fechaHelp"
+            />
+            <small class="muted" id="fechaHelp">Por defecto: hoy (no admite futuras).</small>
+          </div>
+          <div>
+            <button id="addBtn" type="button" aria-label="Registrar peso">Registrar</button>
+          </div>
+        </div>
+
+        <p id="status" class="muted" role="status" aria-live="polite" aria-atomic="true" style="margin:12px 0 0"></p>
+
+        <table id="histTable" class="hide" aria-label="Histórico de pesos">
+          <thead>
+            <tr>
+              <th scope="col">Fecha (dd/mm/yyyy)</th>
+              <th scope="col">Peso (kg)</th>
+              <th scope="col">Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="histBody"></tbody>
+        </table>
+      </div>
+
+      <div class="footer">
+        <p class="muted" style="margin:0.75rem 0 0">Tus datos se envían de forma segura al registro de tu nutricionista.</p>
+
+        <!-- Franja de colaboración -->
+        <div class="collab" aria-label="Colaboración">
+          <small>En colaboración con</small>
+          <img
+            src="./assets/img/escudoespartanomtxs.png"
+            alt="MTXS"
+            class="collab-logo"
+            loading="lazy"
+            decoding="async"
+          />
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal de acceso -->
+  <div class="login-backdrop" id="loginModal" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
+    <div class="card login">
+      <div class="content">
+        <h2 id="loginTitle" style="margin-top:0">Accede a tu registro</h2>
+        <p class="muted" style="margin-top:0">Introduce tu <strong>id de usuario</strong> y tu <strong>token</strong>.</p>
+        <form id="loginForm" style="display:grid;gap:12px" autocomplete="on">
+          <div>
+            <label for="userId">ID de usuario</label>
+            <input id="userId" name="userId" type="text" placeholder="Ej: ana" autocomplete="username" autocapitalize="off" required />
+          </div>
+          <div>
+            <label for="token">Token</label>
+            <input id="token" name="token" type="password" placeholder="Tu token personal" autocomplete="current-password" required />
+          </div>
+          <button id="loginBtn" type="submit">Entrar</button>
+          <small class="muted">También puedes abrir con <code>?userId=ana&token=TU_TOKEN</code>.</small>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== JS ===================== -->
+  <script>
+    // ========= CONFIG =========
+    const APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwxRpMb_dMvMOKgJX-3GUUyYpdbVwikucwRURrJlX73FxwMXcCHUxmWGkoP9Rox0TFGWA/exec"; // ← pega aquí tu URL /exec
+
+    // ========= Utils =========
+    const el = id => document.getElementById(id);
+    const okURL = u => /^https?:\/\/.+\/exec(\b|$)/.test(u||"");
+    const show = (node, v=true) => node && node.classList.toggle("hide", !v);
+    const normalize = v => { const n=Number(String(v||"").trim().replace(",", ".")); return Number.isFinite(n)?n:null; };
+
+    const pad2 = n => String(n).padStart(2,"0");
+    const todayISO = () => {
+      const now = new Date();
+      return `${now.getFullYear()}-${pad2(now.getMonth()+1)}-${pad2(now.getDate())}`;
+    };
+    const isoToDDMMYYYY = iso => {
+      if(!iso) return null;
+      const [y,m,d] = iso.split("-");
+      return `${d}/${m}/${y}`;
+    };
+
+    const setCreds = ({userId, token}) => { localStorage.setItem("userId", userId); localStorage.setItem("token", token); };
+    const getCreds = () => ({ userId: localStorage.getItem("userId"), token: localStorage.getItem("token") });
+    const clearCreds = () => { localStorage.removeItem("userId"); localStorage.removeItem("token"); };
+
+    const renderStatus = (msg, cls="muted") => { const s=el("status"); s.textContent = msg; s.className = cls; };
+
+    // ========= Parse robusto =========
+    async function parseJSONResponse(res){
+      const txt = await res.text();
+      try { return JSON.parse(txt); } catch {}
+      if (txt.startsWith("data=")) { try { return JSON.parse(decodeURIComponent(txt.slice(5))); } catch {} }
+      throw new Error("Respuesta no JSON del backend: " + txt.slice(0,120));
+    }
+
+    // ========= API =========
+    async function apiList(userId, token, limit=180){
+      if (!okURL(APP_SCRIPT_URL)) throw new Error("Configura APP_SCRIPT_URL (debe acabar en /exec).");
+      const url = new URL(APP_SCRIPT_URL);
+      url.searchParams.set("action","list");
+      url.searchParams.set("userId", userId);
+      url.searchParams.set("token", token);
+      url.searchParams.set("limit", String(limit));
+      const res = await fetch(url.toString());
+      return parseJSONResponse(res);
+    }
+
+    async function apiAdd(userId, token, weight, dateDDMMYYYY){
+      if (!okURL(APP_SCRIPT_URL)) throw new Error("Configura APP_SCRIPT_URL (debe acabar en /exec).");
+      const bo
