@@ -15,7 +15,7 @@
   <link rel="icon" href="data:," />
 
   <!-- Preload imagen del hero -->
-  <link rel="prefetch" as="image" href="./assets/img/Logomtxsblancotagline.png" />
+  <link rel="preload" as="image" href="./assets/img/logo-texto-con-fondo.png?v=1" />
   <link rel="preconnect" href="https://script.google.com" crossorigin />
 </head>
 <body>
@@ -28,10 +28,10 @@
       <!-- HERO: cabecero con imagen -->
       <header class="brand-header hero" role="banner">
         <img
-          src="./assets/img/Logomtxsblancotagline.png?v=1"
-          alt="MTXS — Nutrición online"
+          src="./assets/img/logo-texto-con-fondo.png?v=1"
+          alt="Jaime Valencia — Entrenamiento Personal, Nutrición y Programación online"
           class="hero-img"
-          loading="lazy"
+          loading="eager"
           fetchpriority="high"
           decoding="async"
         />
@@ -76,7 +76,7 @@
             <small class="muted" id="fechaHelp">Por defecto: hoy (no admite futuras).</small>
           </div>
           <div>
-            <button id="addBtn" type="button" aria-label="Registrar peso">Registrar</button>
+            <button id="addBtn" type="button" aria-label="Registrar peso" onclick="handleAdd()">Registrar</button>
           </div>
         </div>
 
@@ -101,7 +101,7 @@
         <div class="collab" aria-label="Colaboración">
           <small>En colaboración con</small>
           <img
-            src="./assets/img/escudoespartanomtxs.png"
+            src="./assets/img/MTXS.png"
             alt="MTXS"
             class="collab-logo"
             loading="lazy"
@@ -137,7 +137,7 @@
   <!-- ===================== JS ===================== -->
   <script>
     // ========= CONFIG =========
-    const APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwxRpMb_dMvMOKgJX-3GUUyYpdbVwikucwRURrJlX73FxwMXcCHUxmWGkoP9Rox0TFGWA/exec"; // ← pega aquí tu URL /exec
+    const APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyD6nLT8yS_0RJVWTBGz7H3AJbOr0nr5kqpgcEh95dPUtfyMcr7LdLLhchZ2_EjKEVf/exec"; // ← pega aquí tu URL /exec
 
     // ========= Utils =========
     const el = id => document.getElementById(id);
@@ -184,4 +184,169 @@
 
     async function apiAdd(userId, token, weight, dateDDMMYYYY){
       if (!okURL(APP_SCRIPT_URL)) throw new Error("Configura APP_SCRIPT_URL (debe acabar en /exec).");
-      const bo
+      const body = new URLSearchParams({ data: JSON.stringify({ action:"add", userId, token, weight, date: dateDDMMYYYY }) });
+      const res = await fetch(APP_SCRIPT_URL, {
+        method:"POST",
+        headers: { "Content-Type":"application/x-www-form-urlencoded;charset=UTF-8" },
+        body: body.toString()
+      });
+      return parseJSONResponse(res);
+    }
+
+    async function apiDelete(userId, token, row){
+      const body = new URLSearchParams({ data: JSON.stringify({ action:"delete", userId, token, row }) });
+      const res = await fetch(APP_SCRIPT_URL, {
+        method:"POST",
+        headers: { "Content-Type":"application/x-www-form-urlencoded;charset=UTF-8" },
+        body: body.toString()
+      });
+      return parseJSONResponse(res);
+    }
+
+    // ========= Render =========
+    function renderTable(rows){
+      const tb = el("histBody");
+      tb.innerHTML = "";
+      (rows||[]).forEach(r=>{
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${r.date}</td>
+          <td>${r.weight}</td>
+          <td>
+            <button class="btn-del btn-small" type="button" data-row="${r.row}" data-date="${r.date}" data-weight="${r.weight}" title="Eliminar">🗑️ Eliminar</button>
+          </td>
+        `;
+        tb.appendChild(tr);
+      });
+      show(el("histTable"), (rows||[]).length>0);
+    }
+
+    async function loadHistory(){
+      const { userId, token } = getCreds();
+      if (!userId || !token) return;
+      renderStatus("Cargando histórico…");
+      try{
+        const data = await apiList(userId, token);
+        if (data.ok){ renderTable(data.items||[]); renderStatus(`Histórico cargado (${(data.items||[]).length}).`); }
+        else { renderStatus(data.error || "No se pudo cargar el histórico.", "err"); }
+      }catch(e){ renderStatus(e.message || "Error al cargar histórico.", "err"); }
+    }
+
+    async function handleAdd(){
+      const { userId, token } = getCreds();
+      if (!userId || !token){ renderStatus("Primero inicia sesión.", "err"); showModal(); return; }
+
+      const w = normalize(el("peso").value);
+      if (w==null || w<20 || w>400){ renderStatus("Introduce un peso válido (20–400 kg).", "err"); el("peso").focus(); return; }
+
+      const iso = el("fecha").value || todayISO();
+      const dateStr = isoToDDMMYYYY(iso);
+
+      el("addBtn").disabled = true; renderStatus("Guardando…");
+      try{
+        const data = await apiAdd(userId, token, w, dateStr);
+        if (data.ok){
+          el("peso").value = "";
+          renderStatus("Registro guardado.", "ok");
+          await loadHistory();
+        } else {
+          renderStatus(data.error || "No se pudo guardar.", "err");
+        }
+      }catch(e){ renderStatus(e.message || "Error de red/servidor.", "err"); }
+      finally{ el("addBtn").disabled = false; }
+    }
+
+    // Delegación de clics para borrar
+    document.addEventListener("click", async (e)=>{
+      const btn = e.target.closest(".btn-del");
+      if (!btn) return;
+      const row = Number(btn.dataset.row);
+      const date = btn.dataset.date;
+      const weight = btn.dataset.weight;
+      if (!Number.isFinite(row) || row<2){ renderStatus("Registro inválido.", "err"); return; }
+      if (!confirm(`¿Eliminar el registro del ${date} (${weight} kg)? Esta acción no se puede deshacer.`)) return;
+      const { userId, token } = getCreds();
+      if (!userId || !token){ renderStatus("Primero inicia sesión.", "err"); return; }
+      btn.disabled = true; renderStatus("Eliminando…");
+      try {
+        const res = await apiDelete(userId, token, row);
+        if (res.ok){ renderStatus("Registro eliminado.", "ok"); await loadHistory(); }
+        else { renderStatus(res.error || "No se pudo eliminar.", "err"); }
+      } catch(err){ renderStatus(err.message || "Error al eliminar.", "err"); }
+      finally{ btn.disabled = false; }
+    });
+
+    // Modal helpers
+    function hideModal(){
+      const m = el("loginModal");
+      if(!m) return;
+      m.classList.add("hide");
+      m.style.display="none";
+      m.setAttribute("aria-hidden","true");
+    }
+    function showModal(){
+      const m = el("loginModal");
+      if(!m) return;
+      m.classList.remove("hide");
+      m.style.display="flex";
+      m.removeAttribute("aria-hidden");
+    }
+
+    function syncCredsFromQuery(){
+      const url = new URL(location.href);
+      const u = url.searchParams.get("userId");
+      const t = url.searchParams.get("token");
+      if (u && t) setCreds({ userId:u, token:t });
+    }
+
+    async function updateAuthUI(){
+      const { userId, token } = getCreds();
+      const logged = !!(userId && token);
+      if (logged){ hideModal(); el("logoutBtn").classList.remove("hide"); await loadHistory(); }
+      else { showModal(); el("logoutBtn").classList.add("hide"); }
+    }
+
+    // ========= Init =========
+    window.addEventListener("DOMContentLoaded", () => {
+      syncCredsFromQuery();
+      updateAuthUI();
+
+      // Inicializa fecha (hoy y sin futuras)
+      const fecha = el("fecha");
+      if (fecha){
+        const iso = todayISO();
+        fecha.value = iso;
+        fecha.max = iso;
+      }
+
+      // Atajos Enter
+      el("peso").addEventListener("keydown", e => { if (e.key === "Enter") handleAdd(); });
+      el("fecha").addEventListener("keydown", e => { if (e.key === "Enter") handleAdd(); });
+
+      // Login form
+      el("loginForm")?.addEventListener("submit", (e) => {
+        e.preventDefault();
+        const userId = el("userId").value.trim();
+        const token  = el("token").value.trim();
+        if (!userId || !token){ renderStatus("Completa ID y token.", "err"); return; }
+        setCreds({ userId, token }); hideModal(); el("logoutBtn").classList.remove("hide");
+        renderStatus("Sesión iniciada. Cargando histórico…"); updateAuthUI();
+      });
+
+      // Logout
+      el("logoutBtn").addEventListener("click", () => {
+        clearCreds(); renderTable([]); renderStatus("Sesión cerrada."); showModal(); el("logoutBtn").classList.add("hide");
+      });
+
+      if (!okURL(APP_SCRIPT_URL)){
+        renderStatus("⚠️ APP_SCRIPT_URL no válida (debe terminar en /exec).", "err");
+      }
+    });
+
+    window.addEventListener("error", ev => {
+      console.error(ev.error || ev.message);
+      renderStatus("Error: " + (ev.message || "consulta consola"), "err");
+    });
+  </script>
+</body>
+</html>
